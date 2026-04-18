@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>車城國小｜海報切割及去背工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+    <style>
+        @page           { size: A4 portrait;  margin: 0; }
+        @page landscape { size: A4 landscape; margin: 0; }
+        @media print {
+            .no-print { display: none !important; }
+            body { margin: 0; padding: 0; background: white; }
+            .print-page {
+                page-break-after: always; page-break-inside: avoid;
+                width: 210mm; height: 297mm;
+                overflow: hidden; background: white; display: block;
+            }
+            .print-page img { width: 210mm; height: 297mm; object-fit: fill; display: block; }
+            .print-page.landscape { page: landscape; width: 297mm; height: 210mm; }
+            .print-page.landscape img { width: 297mm; height: 210mm; }
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Toggle */
+        .toggle-input { position: absolute; opacity: 0; width: 0; height: 0; }
+        .toggle-track {
+            width: 44px; height: 24px; background: #e2e8f0;
+            border-radius: 12px; position: relative; cursor: pointer;
+            transition: background .25s; flex-shrink: 0;
+        }
+        .toggle-track::after {
+            content: ''; position: absolute; top: 2px; left: 2px;
+            width: 20px; height: 20px; background: white;
+            border-radius: 50%; transition: transform .25s;
+            box-shadow: 0 1px 3px rgba(0,0,0,.2);
+        }
+        .toggle-input:checked + .toggle-track { background: #3b82f6; }
+        .toggle-input:checked + .toggle-track::after { transform: translateX(20px); }
+        .toggle-input#auto4K:checked + .toggle-track { background: #8b5cf6; }
+        .toggle-input#autoBgRemoval:checked + .toggle-track { background: #2563eb; }
+        .toggle-input#enablePaste:checked + .toggle-track { background: #2563eb; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .animate-spin { animation: spin 1.5s linear infinite; }
+
+        /* Crop editor canvas modes */
+        #cropCanvas { display: block; max-width: 100%; border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+        #cropCanvas.mode-move   { cursor: default; }
+        #cropCanvas.mode-addV   { cursor: col-resize; }
+        #cropCanvas.mode-addH   { cursor: row-resize; }
+        #cropCanvas.mode-delete { cursor: not-allowed; }
+        #cropCanvas.dragging    { cursor: grabbing !important; }
+
+        /* Tool buttons */
+        .tool-btn {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 7px 12px; border-radius: 8px; font-size: 12px; font-weight: 600;
+            cursor: pointer; border: 2px solid transparent; transition: all .18s; white-space: nowrap;
+        }
+        .tool-btn.active  { background: #7c3aed; color: white; border-color: #7c3aed; }
+        .tool-btn:not(.active) { background: white; color: #374151; border-color: #e5e7eb; }
+        .tool-btn:not(.active):hover { border-color: #7c3aed; color: #7c3aed; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen flex flex-col">
+
+<!-- Header -->
+<header class="bg-white shadow-sm border-b border-gray-200 no-print">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center gap-3">
+        <div class="bg-blue-600 p-2 rounded-lg">
+            <i data-lucide="scissors" class="text-white w-6 h-6"></i>
+        </div>
+        <div>
+            <h1 class="text-xl font-bold text-gray-900">車城國小｜海報切割及去背工具</h1>
+            <div class="text-xs text-blue-600 font-medium mt-0.5">專為教學海報與大圖輸出設計</div>
+        </div>
+    </div>
+</header>
+
+<!-- Main -->
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 no-print flex-1 w-full">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+        <!-- ── Sidebar ── -->
+        <div class="lg:col-span-4 space-y-6">
+
+            <!-- Step 1: Upload -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <i data-lucide="image-plus" class="w-5 h-5 text-gray-500"></i>
+                    步驟 1：匯入影像設定
+                </h2>
+                <div class="flex flex-col gap-3 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                    <label class="flex items-center justify-between cursor-pointer gap-3">
+                        <span class="text-sm font-medium text-gray-700 flex items-center gap-2">
+                            <i data-lucide="wand-2" class="w-4 h-4 text-purple-500"></i>
+                            自動轉換 4K 高畫質
+                        </span>
+                        <input type="checkbox" id="auto4K" class="toggle-input" checked>
+                        <div class="toggle-track"></div>
+                    </label>
+                    <label class="flex items-center justify-between cursor-pointer gap-3">
+                        <span class="text-sm font-medium text-gray-700 flex items-center gap-2">
+                            <i data-lucide="sparkles" class="w-4 h-4 text-blue-500"></i>
+                            啟用 AI 自動去背
+                        </span>
+                        <input type="checkbox" id="autoBgRemoval" class="toggle-input">
+                        <div class="toggle-track"></div>
+                    </label>
+                    <div id="bgHint" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded-lg leading-relaxed">
+                        ⚠️ AI 去背需下載模型（約 40 MB），首次使用需 30~60 秒。<br>
+                        <span id="localFileWarn" class="hidden text-red-600">❌ 本機直接開啟時 CDN 可能被封鎖，請部署至 GitHub Pages。</span>
+                        <span class="text-gray-500 mt-1 block">💡 若去背失敗，可先至 <a href="https://www.remove.bg" target="_blank" class="text-blue-600 underline">remove.bg</a> 手動去背後再上傳。</span>
+                    </div>
+                </div>
+                <label class="flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-white hover:bg-gray-50 transition-colors relative overflow-hidden" id="dropZone">
+                    <div id="uploadPlaceholder" class="flex flex-col items-center justify-center pt-5 pb-6 z-10 transition-opacity">
+                        <i data-lucide="upload-cloud" class="w-10 h-10 text-gray-400 mb-3"></i>
+                        <p class="mb-1 text-sm text-gray-500"><span class="font-semibold text-blue-600">點擊上傳</span> 或拖曳圖片至此</p>
+                        <p class="text-xs text-gray-400">支援 JPG、PNG、WEBP 等格式</p>
+                    </div>
+                    <img id="originalPreview" class="absolute inset-0 w-full h-full object-contain hidden opacity-40" />
+                    <input id="imageInput" type="file" class="hidden" accept="image/*">
+                </label>
+            </div>
+
+            <!-- Step 2: Crop editor sidebar controls -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-purple-500 transition-opacity duration-300"
+                 id="cropEditorPanel" style="opacity:.5;pointer-events:none">
+                <h2 class="text-lg font-semibold mb-1 flex items-center gap-2">
+                    <i data-lucide="move" class="w-5 h-5 text-purple-500"></i>
+                    步驟 2：移動與微調裁切線
+                </h2>
+                <p class="text-xs text-gray-500 mb-4 leading-relaxed">「微調裁切線」可以透過滑鼠拖曳調整條對齊的格線進行微調；「切分」與「刪除」則維持局部區塊精準控制。</p>
+
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">水平分割 (欄)</label>
+                        <input type="number" id="cols" min="1" max="15" value="2"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-purple-400 focus:border-purple-400 outline-none text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">垂直分割 (列)</label>
+                        <input type="number" id="rows" min="1" max="15" value="3"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-purple-400 focus:border-purple-400 outline-none text-sm">
+                    </div>
+                </div>
+                <button id="applyGridBtn"
+                        class="w-full mb-4 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
+                    <i data-lucide="grid-3x3" class="w-4 h-4"></i>
+                    套用格線到畫布
+                </button>
+
+                <div class="bg-gray-50 p-3 rounded-lg border border-gray-100 mb-3">
+                    <label class="block text-xs font-medium text-gray-600 mb-2 flex justify-between">
+                        <span>圖片縮放比例 (輔助檢視)</span>
+                        <span id="zoomDisplay" class="text-purple-600 font-semibold">100%</span>
+                    </label>
+                    <input type="range" id="zoomSlider" min="20" max="200" value="100"
+                           class="w-full h-2 bg-purple-200 rounded-lg appearance-none cursor-pointer accent-purple-600">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="resetCropBtn"
+                            class="bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm border border-gray-200">
+                        <i data-lucide="rotate-ccw" class="w-4 h-4"></i> 重設
+                    </button>
+                    <button id="goToOutputBtn"
+                            class="bg-gray-800 hover:bg-black text-white font-medium py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
+                        <i data-lucide="chevron-down" class="w-4 h-4"></i> 回上一步
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Output Settings -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 transition-opacity duration-300"
+                 id="settingsPanel" style="opacity:.5;pointer-events:none">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <i data-lucide="settings" class="w-5 h-5 text-gray-500"></i>
+                    步驟 3：輸出設定
+                </h2>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">A4 紙張方向</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex items-center justify-center gap-2 cursor-pointer border-2 rounded-lg py-2 px-3 text-sm font-medium transition-colors border-blue-500 bg-blue-50 text-blue-700" id="lblPortrait">
+                            <input type="radio" name="a4orientation" id="orientPortrait" value="portrait" class="hidden" checked>
+                            <i data-lucide="file" class="w-4 h-4"></i> 直向
+                        </label>
+                        <label class="flex items-center justify-center gap-2 cursor-pointer border-2 rounded-lg py-2 px-3 text-sm font-medium transition-colors border-gray-200 bg-white text-gray-600" id="lblLandscape">
+                            <input type="radio" name="a4orientation" id="orientLandscape" value="landscape" class="hidden">
+                            <i data-lucide="file" class="w-4 h-4 rotate-90"></i> 橫向
+                        </label>
+                    </div>
+                </div>
+
+                <div class="mb-5 text-xs text-gray-500 bg-gray-50 border border-gray-200 p-2 rounded-lg leading-relaxed">
+                    每塊輸出尺寸：<strong id="a4SizeLabel" class="text-gray-700">2480 × 3508 px（A4 直向 300dpi）</strong><br>
+                    總張數：<strong id="a4TotalLabel" class="text-gray-700">— 張</strong>
+                </div>
+
+                <div class="border-t border-gray-200 pt-4 mb-4">
+                    <label class="flex items-center gap-3 cursor-pointer mb-3">
+                        <input type="checkbox" id="enablePaste" class="toggle-input" checked>
+                        <div class="toggle-track"></div>
+                        <span class="text-sm font-medium text-gray-900">加入列印黏貼處 (防呆輔助)</span>
+                    </label>
+                    <div id="pasteSizeContainer" class="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <label class="block text-sm font-medium text-gray-700 mb-2 flex justify-between">
+                            <span>黏貼處寬度</span>
+                            <span id="pasteSizeDisplay" class="text-blue-600 font-semibold bg-white px-2 rounded shadow-sm">60 px</span>
+                        </label>
+                        <input type="range" id="pasteSize" min="20" max="150" value="60"
+                               class="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                    </div>
+                </div>
+
+                <button id="generateBtn"
+                        class="w-full bg-gray-900 hover:bg-black text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md">
+                    <i data-lucide="layers" class="w-5 h-5"></i>
+                    開始產生海報圖塊
+                </button>
+            </div>
+
+            <!-- Step 4: Download/Print -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 hidden border-l-4 border-l-green-500"
+                 id="actionsPanel">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <i data-lucide="check-circle-2" class="w-5 h-5 text-green-500"></i>
+                    步驟 4：選擇輸出方式
+                </h2>
+                <div class="flex flex-col gap-3">
+                    <button id="downloadZipBtn"
+                            class="w-full bg-white border border-gray-300 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 text-gray-700 font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
+                        <i data-lucide="folder-down" class="w-5 h-5"></i>
+                        打包下載 (ZIP)
+                    </button>
+                    <button id="printBtn"
+                            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md">
+                        <i data-lucide="printer" class="w-5 h-5"></i>
+                        直接列印 A4
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Right Panel ── -->
+        <div class="lg:col-span-8 space-y-6">
+
+            <!-- Crop Editor Canvas -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 hidden" id="cropEditorArea">
+                <!-- Tool bar -->
+                <div class="flex items-start justify-between mb-3 flex-wrap gap-y-3">
+                    <div>
+                        <h2 class="text-base font-bold text-purple-700 flex items-center gap-2 mb-1">
+                            <i data-lucide="move" class="w-4 h-4"></i>
+                            步驟二：移動與微調裁切線
+                        </h2>
+                        <p id="modeHint" class="text-xs text-gray-400">🖱️ 拖曳格線調整位置，靠近格線時游標會自動變換。</p>
+                    </div>
+                    <div class="flex gap-2 flex-wrap">
+                        <button class="tool-btn active" id="toolMove"   data-mode="move"><i data-lucide="move"   class="w-3.5 h-3.5"></i> 微調裁切線</button>
+                        <button class="tool-btn"        id="toolAddV"   data-mode="addV"><i data-lucide="separator-vertical"   class="w-3.5 h-3.5"></i> 新增直切線</button>
+                        <button class="tool-btn"        id="toolAddH"   data-mode="addH"><i data-lucide="separator-horizontal" class="w-3.5 h-3.5"></i> 新增橫切線</button>
+                        <button class="tool-btn"        id="toolDelete" data-mode="delete"><i data-lucide="eraser" class="w-3.5 h-3.5"></i> 刪除裁切線</button>
+                    </div>
+                </div>
+
+                <!-- Canvas scroll wrapper -->
+                <div id="cropCanvasWrapper"
+                     class="overflow-auto rounded-lg border border-gray-200 bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2NkYGAQYcAP3uCTZhw1gGGYhAGBZIA/NBg1gGHwyQAGBsE2+NNAcNoA/wA56BA1w3x73QAAAABJRU5ErkJggg==')]"
+                     style="max-height:65vh">
+                    <canvas id="cropCanvas" class="mode-move"></canvas>
+                </div>
+
+                <!-- Info bar -->
+                <div class="mt-3 flex items-center justify-between text-xs text-gray-500 flex-wrap gap-2">
+                    <div class="flex gap-4">
+                        <span>直切線：<strong id="vLineCount" class="text-purple-600">0</strong> 條</span>
+                        <span>橫切線：<strong id="hLineCount" class="text-purple-600">0</strong> 條</span>
+                        <span>→ 共 <strong id="blockCount" class="text-purple-700">1</strong> 塊</span>
+                    </div>
+                    <span class="text-gray-400">格線位置以比例儲存，不受縮放影響</span>
+                </div>
+            </div>
+
+            <!-- Split Result Preview -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col" style="min-height:360px">
+                <h2 class="text-lg font-semibold mb-4 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="monitor-play" class="w-5 h-5 text-gray-500"></i>
+                        分割結果預覽
+                    </div>
+                    <span id="previewInfo" class="text-sm font-medium bg-blue-100 text-blue-800 px-3 py-1 rounded-full hidden"></span>
+                </h2>
+                <div id="emptyPreview"
+                     class="flex-1 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-100 rounded-lg bg-gray-50/50">
+                    <i data-lucide="layout-dashboard" class="w-16 h-16 mb-4 opacity-30 text-gray-300"></i>
+                    <p>請先完成左側設定並點擊「開始產生」</p>
+                </div>
+                <div id="previewGridContainer"
+                     class="flex-1 w-full hidden bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2NkYGAQYcAP3uCTZhw1gGGYhAGBZIA/NBg1gGHwyQAGBsE2+NNAcNoA/wA56BA1w3x73QAAAABJRU5ErkJggg==')] rounded-lg overflow-auto p-4 border border-gray-200">
+                    <div id="previewGrid" class="gap-1 shadow-lg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<footer class="bg-gray-800 text-gray-300 text-center py-4 mt-auto no-print text-sm">
+    <div class="flex items-center justify-center gap-2">
+        車城國小資訊老師 @ Google Gemini 協作設計
+        <i data-lucide="sparkles" class="w-4 h-4 text-yellow-400"></i>
+    </div>
+</footer>
+
+<div id="printContainer" style="display:none"></div>
+<style>@media print { #printContainer { display: block !important; } }</style>
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+    <div class="bg-white p-6 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 text-center">
+        <i data-lucide="loader" class="w-12 h-12 text-blue-600 animate-spin mb-4"></i>
+        <h3 class="text-xl font-bold text-gray-900 mb-2" id="loadingTitle">處理中</h3>
+        <p class="text-sm text-gray-500 mb-4 whitespace-pre-line" id="loadingText"></p>
+        <div id="aiWarning" class="hidden text-xs text-orange-600 bg-orange-50 p-2 rounded w-full border border-orange-100">
+            ℹ️ 首次使用 AI 去背需下載模型 (約 40MB)，請耐心等候。
+        </div>
+    </div>
+</div>
+
+<!-- Message Modal -->
+<div id="messageModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4">
+        <div class="flex items-center gap-3 mb-4">
+            <i data-lucide="bell-ring" class="w-6 h-6 text-blue-600"></i>
+            <h3 class="text-lg font-bold text-gray-900" id="messageTitle">提示</h3>
+        </div>
+        <p class="text-gray-600 mb-6 leading-relaxed whitespace-pre-line" id="messageText"></p>
+        <button id="closeMessageBtn" class="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold py-2.5 rounded-lg transition-colors border border-blue-200">我知道了</button>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<script type="module">
+lucide.createIcons();
+
+const $ = id => document.getElementById(id);
+
+// DOM refs
+const imageInput          = $('imageInput');
+const dropZone            = $('dropZone');
+const originalPreview     = $('originalPreview');
+const uploadPlaceholder   = $('uploadPlaceholder');
+const cropEditorPanel     = $('cropEditorPanel');
+const cropEditorArea      = $('cropEditorArea');
+const settingsPanel       = $('settingsPanel');
+const colsInput           = $('cols');
+const rowsInput           = $('rows');
+const applyGridBtn        = $('applyGridBtn');
+const resetCropBtn        = $('resetCropBtn');
+const goToOutputBtn       = $('goToOutputBtn');
+const zoomSlider          = $('zoomSlider');
+const zoomDisplay         = $('zoomDisplay');
+const enablePasteChk      = $('enablePaste');
+const pasteSizeInput      = $('pasteSize');
+const pasteSizeDisplay    = $('pasteSizeDisplay');
+const generateBtn         = $('generateBtn');
+const actionsPanel        = $('actionsPanel');
+const downloadZipBtn      = $('downloadZipBtn');
+const printBtn            = $('printBtn');
+const previewGridCont     = $('previewGridContainer');
+const previewGrid         = $('previewGrid');
+const emptyPreview        = $('emptyPreview');
+const previewInfo         = $('previewInfo');
+const printContainer      = $('printContainer');
+const auto4KToggle        = $('auto4K');
+const autoBgRemovalToggle = $('autoBgRemoval');
+const bgHint              = $('bgHint');
+const cropCanvas          = $('cropCanvas');
+const cropCtx             = cropCanvas.getContext('2d');
+
+// ── State ──────────────────────────────────────────────
+let currentImage        = null;
+let generatedImagesData = [];
+
+// Crop editor
+let vLines     = [];       // x-ratios (0~1) for vertical cut lines
+let hLines     = [];       // y-ratios (0~1) for horizontal cut lines
+let cropZoom   = 1.0;
+let editorMode = 'move';
+let dragLine   = null;     // { axis:'v'|'h', idx:number }
+const HIT_PX   = 9;        // hit-test distance in canvas pixels
+
+// ── Helpers ────────────────────────────────────────────
+const showMessage = (title, text) => {
+    $('messageTitle').innerText = title;
+    $('messageText').innerText  = text;
+    $('messageModal').classList.remove('hidden');
+};
+$('closeMessageBtn').addEventListener('click', () => $('messageModal').classList.add('hidden'));
+
+const showLoading = (show, title = '處理中', text = '', isAI = false) => {
+    if (show) {
+        $('loadingTitle').innerText  = title;
+        $('loadingText').innerText   = text;
+        $('aiWarning').style.display = isAI ? 'block' : 'none';
+        $('loadingOverlay').classList.remove('hidden');
+    } else {
+        $('loadingOverlay').classList.add('hidden');
+    }
+};
+
+// ── Toggles ────────────────────────────────────────────
+autoBgRemovalToggle.addEventListener('change', () => {
+    bgHint.classList.toggle('hidden', !autoBgRemovalToggle.checked);
+    if (autoBgRemovalToggle.checked && location.protocol === 'file:')
+        $('localFileWarn').classList.remove('hidden');
+});
+enablePasteChk.addEventListener('change', () => {
+    $('pasteSizeContainer').style.opacity = enablePasteChk.checked ? '1' : '0.5';
+    pasteSizeInput.disabled = !enablePasteChk.checked;
+});
+pasteSizeInput.addEventListener('input', () => {
+    pasteSizeDisplay.innerText = `${pasteSizeInput.value} px`;
+});
+
+// ── A4 output ──────────────────────────────────────────
+const A4_PX = { portrait: { w: 2480, h: 3508 }, landscape: { w: 3508, h: 2480 } };
+const getOrientation = () => $('orientPortrait').checked ? 'portrait' : 'landscape';
+
+const updateOrientUI = () => {
+    const isP = $('orientPortrait').checked;
+    $('lblPortrait').className  = `flex items-center justify-center gap-2 cursor-pointer border-2 rounded-lg py-2 px-3 text-sm font-medium transition-colors ${isP  ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-600'}`;
+    $('lblLandscape').className = `flex items-center justify-center gap-2 cursor-pointer border-2 rounded-lg py-2 px-3 text-sm font-medium transition-colors ${!isP ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-600'}`;
+    updateA4Hint();
+};
+const updateA4Hint = () => {
+    const { w, h } = A4_PX[getOrientation()];
+    const label  = getOrientation() === 'portrait' ? '直向' : '橫向';
+    const blocks = (vLines.length + 1) * (hLines.length + 1);
+    $('a4SizeLabel').innerText = `${w} × ${h} px（A4 ${label} 300dpi）`;
+    $('a4TotalLabel').innerText = `${blocks} 張`;
+};
+$('orientPortrait').addEventListener('change',  updateOrientUI);
+$('orientLandscape').addEventListener('change', updateOrientUI);
+
+// ── 4K upscale ─────────────────────────────────────────
+const upscaleTo4K = (blob) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX = 3840;
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (Math.max(w, h) < MAX) { const s = MAX / Math.max(w, h); w = Math.round(w*s); h = Math.round(h*s); }
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const c = cv.getContext('2d');
+        c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+        c.drawImage(img, 0, 0, w, h);
+        cv.toBlob(b => resolve(b), 'image/png', 1.0);
+    };
+    img.onerror = reject; img.src = url;
+});
+
+// ── AI bg removal (ESM dynamic import via esm.sh) ──────
+// @imgly/background-removal 是純 ESM，必須用 import() 載入
+// esm.sh 會自動處理依賴與 WASM 路徑
+const IMGLY_ESM = 'https://esm.sh/@imgly/background-removal@1.4.5';
+
+let _imglyModule = null;
+
+const loadImgly = async () => {
+    if (_imglyModule) return _imglyModule;
+    _imglyModule = await import(IMGLY_ESM);
+    return _imglyModule;
+};
+
+const removeBackground = async (blob) => {
+    $('loadingText').innerText = '正在載入 AI 模型...\n(首次載入需 30~60 秒，請耐心等候)';
+    let mod;
+    try {
+        mod = await loadImgly();
+    } catch(e) {
+        throw new Error('ESM 模組載入失敗，請確認網路可存取 esm.sh：' + e.message);
+    }
+    const fn = mod.removeBackground ?? mod.default?.removeBackground ?? mod.default;
+    if (typeof fn !== 'function') throw new Error('找不到 removeBackground 函式，版本可能不相容');
+    $('loadingText').innerText = 'AI 模型分析影像中...';
+    return fn(blob);
+};
+
+// ── Upload ─────────────────────────────────────────────
+const processAndLoadImage = async (file) => {
+    if (!file || !file.type.startsWith('image/')) {
+        showMessage('錯誤', '請上傳有效的圖片檔案 (JPG, PNG 等)。'); return;
+    }
+    const use4K = auto4KToggle.checked;
+    const useBG = autoBgRemovalToggle.checked;
+    if (use4K || useBG) showLoading(true, '智慧影像處理中', '即將完成，請稍候…', useBG);
+
+    let blob = file;
+    try {
+        if (useBG)  blob = await removeBackground(blob);
+        if (use4K) { $('loadingText').innerText = '轉換 4K 高畫質中…'; blob = await upscaleTo4K(blob); }
+
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+            currentImage = img;
+            originalPreview.src = url;
+            originalPreview.classList.remove('hidden');
+            uploadPlaceholder.style.opacity = '0';
+
+            // Unlock step 2 + 3
+            cropEditorPanel.style.opacity = '1';
+            cropEditorPanel.style.pointerEvents = 'auto';
+            settingsPanel.style.opacity = '1';
+            settingsPanel.style.pointerEvents = 'auto';
+            cropEditorArea.classList.remove('hidden');
+
+            // Initial grid
+            vLines = []; hLines = [];
+            applyGridFromInputs();
+
+            // Reset output panel
+            actionsPanel.classList.add('hidden');
+            emptyPreview.classList.remove('hidden');
+            previewGridCont.classList.add('hidden');
+            previewInfo.classList.add('hidden');
+
+            showLoading(false);
+        };
+        img.src = url;
+    } catch (err) {
+        console.error(err);
+        showLoading(false);
+        const extra = location.protocol === 'file:'
+            ? '\n\n⚠️ 本機 file:// 環境下 CDN 被瀏覽器封鎖，請部署到 GitHub Pages 後使用 AI 去背。'
+            : '';
+        showMessage('處理失敗', `錯誤：${err.message}${extra}`);
+    }
+};
+
+imageInput.addEventListener('change', e => {
+    if (e.target.files[0]) processAndLoadImage(e.target.files[0]);
+    imageInput.value = '';
+});
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('border-blue-500','bg-blue-50'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('border-blue-500','bg-blue-50'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('border-blue-500','bg-blue-50');
+    if (e.dataTransfer.files.length) processAndLoadImage(e.dataTransfer.files[0]);
+});
+
+// ══════════════════════════════════════════════════════
+// Crop Editor
+// ══════════════════════════════════════════════════════
+
+// Draw canvas
+const drawCropEditor = () => {
+    if (!currentImage) return;
+    const imgW = currentImage.naturalWidth  || currentImage.width;
+    const imgH = currentImage.naturalHeight || currentImage.height;
+    const dW   = Math.round(imgW * cropZoom);
+    const dH   = Math.round(imgH * cropZoom);
+
+    cropCanvas.width  = dW;
+    cropCanvas.height = dH;
+    cropCtx.clearRect(0, 0, dW, dH);
+    cropCtx.drawImage(currentImage, 0, 0, dW, dH);
+
+    // Helper: draw one line
+    const drawLine = (x1, y1, x2, y2, isActive) => {
+        cropCtx.save();
+        // Shadow for visibility
+        cropCtx.shadowColor = 'rgba(0,0,0,0.6)';
+        cropCtx.shadowBlur  = 6;
+
+        // Outer glow (white)
+        cropCtx.strokeStyle = 'rgba(255,255,255,0.6)';
+        cropCtx.lineWidth   = isActive ? 5 : 3;
+        cropCtx.setLineDash([]);
+        cropCtx.beginPath(); cropCtx.moveTo(x1,y1); cropCtx.lineTo(x2,y2); cropCtx.stroke();
+
+        // Inner line
+        cropCtx.shadowBlur  = 0;
+        cropCtx.strokeStyle = isActive ? '#f97316' : '#ef4444';
+        cropCtx.lineWidth   = isActive ? 2.5 : 1.5;
+        cropCtx.setLineDash(isActive ? [] : [10, 7]);
+        cropCtx.beginPath(); cropCtx.moveTo(x1,y1); cropCtx.lineTo(x2,y2); cropCtx.stroke();
+        cropCtx.restore();
+    };
+
+    vLines.forEach((r, i) => {
+        const x = r * dW;
+        drawLine(x, 0, x, dH, dragLine?.axis==='v' && dragLine?.idx===i);
+    });
+    hLines.forEach((r, i) => {
+        const y = r * dH;
+        drawLine(0, y, dW, y, dragLine?.axis==='h' && dragLine?.idx===i);
+    });
+
+    // Update counters
+    $('vLineCount').innerText = vLines.length;
+    $('hLineCount').innerText = hLines.length;
+    $('blockCount').innerText = (vLines.length+1) * (hLines.length+1);
+    updateA4Hint();
+};
+
+// Apply grid from col/row inputs
+const applyGridFromInputs = () => {
+    const cols = Math.max(1, Math.min(15, parseInt(colsInput.value) || 1));
+    const rows = Math.max(1, Math.min(15, parseInt(rowsInput.value) || 1));
+    vLines = Array.from({ length: cols-1 }, (_, i) => (i+1)/cols);
+    hLines = Array.from({ length: rows-1 }, (_, i) => (i+1)/rows);
+    drawCropEditor();
+};
+
+applyGridBtn.addEventListener('click', applyGridFromInputs);
+resetCropBtn.addEventListener('click', () => {
+    if (!currentImage) return;
+    colsInput.value = 2; rowsInput.value = 3;
+    applyGridFromInputs();
+});
+goToOutputBtn.addEventListener('click', () => {
+    settingsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+// Zoom
+zoomSlider.addEventListener('input', () => {
+    cropZoom = parseInt(zoomSlider.value) / 100;
+    zoomDisplay.innerText = `${zoomSlider.value}%`;
+    drawCropEditor();
+});
+
+// Tool mode
+const HINTS = {
+    move:   '🖱️ 拖曳格線調整位置，靠近格線時游標自動變換。',
+    addV:   '➕ 點擊畫布任意位置，新增一條垂直切線（直切）。',
+    addH:   '➕ 點擊畫布任意位置，新增一條水平切線（橫切）。',
+    delete: '❌ 點擊靠近的格線將其刪除。'
+};
+const setMode = (mode) => {
+    editorMode = mode;
+    ['toolMove','toolAddV','toolAddH','toolDelete'].forEach(id => {
+        $(id).classList.toggle('active', $(id).dataset.mode === mode);
+    });
+    cropCanvas.className = `mode-${mode}`;
+    $('modeHint').innerText = HINTS[mode];
+};
+['toolMove','toolAddV','toolAddH','toolDelete'].forEach(id =>
+    $(id).addEventListener('click', () => setMode($(id).dataset.mode)));
+
+// Canvas coords
+const getPos = (e) => {
+    const r = cropCanvas.getBoundingClientRect();
+    const sx = cropCanvas.width  / r.width;
+    const sy = cropCanvas.height / r.height;
+    const src = e.touches ? e.touches[0] : e;
+    return { x: (src.clientX - r.left)*sx, y: (src.clientY - r.top)*sy };
+};
+
+const findNear = (pos) => {
+    const cw = cropCanvas.width, ch = cropCanvas.height;
+    for (let i = 0; i < vLines.length; i++)
+        if (Math.abs(vLines[i]*cw - pos.x) < HIT_PX) return { axis:'v', idx:i };
+    for (let i = 0; i < hLines.length; i++)
+        if (Math.abs(hLines[i]*ch - pos.y) < HIT_PX) return { axis:'h', idx:i };
+    return null;
+};
+
+// Mouse
+cropCanvas.addEventListener('mousemove', e => {
+    const pos  = getPos(e);
+    const near = findNear(pos);
+    if (dragLine) {
+        cropCanvas.classList.add('dragging');
+        const cw = cropCanvas.width, ch = cropCanvas.height;
+        if (dragLine.axis === 'v') vLines[dragLine.idx] = Math.max(0.005, Math.min(0.995, pos.x/cw));
+        else                       hLines[dragLine.idx] = Math.max(0.005, Math.min(0.995, pos.y/ch));
+        drawCropEditor();
+        return;
+    }
+    if (editorMode === 'move')
+        cropCanvas.style.cursor = near ? (near.axis==='v' ? 'col-resize' : 'row-resize') : 'default';
+    else if (editorMode === 'delete')
+        cropCanvas.style.cursor = near ? 'pointer' : 'not-allowed';
+});
+
+cropCanvas.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    const pos  = getPos(e);
+    const near = findNear(pos);
+    const cw = cropCanvas.width, ch = cropCanvas.height;
+    if (editorMode === 'move') {
+        if (near) dragLine = near;
+    } else if (editorMode === 'addV') {
+        vLines.push(pos.x/cw); vLines.sort((a,b)=>a-b); drawCropEditor(); setMode('move');
+    } else if (editorMode === 'addH') {
+        hLines.push(pos.y/ch); hLines.sort((a,b)=>a-b); drawCropEditor(); setMode('move');
+    } else if (editorMode === 'delete') {
+        if (near) {
+            if (near.axis==='v') vLines.splice(near.idx,1);
+            else                 hLines.splice(near.idx,1);
+            drawCropEditor();
+        }
+    }
+});
+
+window.addEventListener('mouseup', () => {
+    if (dragLine) { dragLine = null; cropCanvas.classList.remove('dragging'); drawCropEditor(); }
+});
+
+// Touch
+cropCanvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const pos = getPos(e);
+    if (editorMode === 'move') { const n = findNear(pos); if (n) dragLine = n; }
+}, { passive: false });
+cropCanvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!dragLine) return;
+    const pos = getPos(e);
+    const cw = cropCanvas.width, ch = cropCanvas.height;
+    if (dragLine.axis==='v') vLines[dragLine.idx] = Math.max(0.005, Math.min(0.995, pos.x/cw));
+    else                     hLines[dragLine.idx] = Math.max(0.005, Math.min(0.995, pos.y/ch));
+    drawCropEditor();
+}, { passive: false });
+cropCanvas.addEventListener('touchend', () => { dragLine = null; drawCropEditor(); });
+
+// ══════════════════════════════════════════════════════
+// Generate — uses vLines/hLines ratios as boundaries
+// ══════════════════════════════════════════════════════
+generateBtn.addEventListener('click', () => {
+    if (!currentImage) return;
+
+    const enablePaste = enablePasteChk.checked;
+    const pasteSize   = parseInt(pasteSizeInput.value) || 60;
+    const orient      = getOrientation();
+    const { w: a4W, h: a4H } = A4_PX[orient];
+
+    // Build boundary arrays using sorted line ratios
+    const xB = [0, ...vLines.slice().sort((a,b)=>a-b), 1];
+    const yB = [0, ...hLines.slice().sort((a,b)=>a-b), 1];
+    const cols = xB.length - 1;
+    const rows = yB.length - 1;
+
+    if (cols * rows > 100) { showMessage('提示', '切割數量超過 100 塊，請減少裁切線。'); return; }
+    showLoading(true, '圖塊產生中', '正在將每塊切割至標準 A4 尺寸…');
+
+    setTimeout(() => {
+        const imgW = currentImage.naturalWidth  || currentImage.width;
+        const imgH = currentImage.naturalHeight || currentImage.height;
+
+        previewGrid.innerHTML    = '';
+        printContainer.innerHTML = '';
+        generatedImagesData      = [];
+
+        previewGrid.style.display             = 'grid';
+        previewGrid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+
+        const pasteScaleW = pasteSize / 500;
+        const pasteScaleH = pasteSize / 500;
+
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const cv  = document.createElement('canvas');
+                const ctx = cv.getContext('2d');
+
+                const hasRight  = enablePaste && (c < cols - 1);
+                const hasBottom = enablePaste && (r < rows - 1);
+
+                cv.width  = a4W;
+                cv.height = a4H;
+
+                const drawW     = hasRight  ? a4W - Math.round(a4W * pasteScaleW) : a4W;
+                const drawH     = hasBottom ? a4H - Math.round(a4H * pasteScaleH) : a4H;
+                const rMarginPx = a4W - drawW;
+                const bMarginPx = a4H - drawH;
+
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, a4W, a4H);
+
+                // Source slice from original image using ratio bounds
+                const srcX = xB[c]   * imgW;
+                const srcY = yB[r]   * imgH;
+                const srcW = (xB[c+1] - xB[c]) * imgW;
+                const srcH = (yB[r+1] - yB[r]) * imgH;
+                ctx.drawImage(currentImage, srcX, srcY, srcW, srcH, 0, 0, drawW, drawH);
+
+                // Paste margin areas
+                if (enablePaste) {
+                    const fs = Math.max(20, Math.min(60, rMarginPx * 0.35));
+                    const dp = (x, y, w, h, rotate) => {
+                        ctx.fillStyle = '#f0f4f8'; ctx.strokeStyle = '#94a3b8';
+                        ctx.lineWidth = 4; ctx.setLineDash([20,20]);
+                        ctx.fillRect(x,y,w,h);
+                        ctx.beginPath();
+                        if (rotate) { ctx.moveTo(x,y); ctx.lineTo(x,y+h); }
+                        else        { ctx.moveTo(x,y); ctx.lineTo(x+w,y); }
+                        ctx.stroke(); ctx.setLineDash([]);
+                        ctx.save();
+                        ctx.fillStyle='#64748b';
+                        ctx.font=`bold ${fs}px "Microsoft JhengHei",sans-serif`;
+                        ctx.textAlign='center'; ctx.textBaseline='middle';
+                        ctx.translate(x+w/2, y+h/2);
+                        if (rotate) ctx.rotate(Math.PI/2);
+                        ctx.fillText('膠水黏貼處', 0, 0);
+                        ctx.restore();
+                    };
+                    if (hasRight)  dp(drawW, 0,     rMarginPx, drawH,    true);
+                    if (hasBottom) dp(0,     drawH, drawW,     bMarginPx, false);
+                    if (hasRight && hasBottom) {
+                        ctx.fillStyle = '#e2e8f0';
+                        ctx.fillRect(drawW, drawH, rMarginPx, bMarginPx);
+                    }
+                }
+
+                const dataUrl  = cv.toDataURL('image/jpeg', 0.95);
+                const filename = `Poster_R${r+1}_C${c+1}.jpg`;
+                generatedImagesData.push({ dataUrl, filename });
+
+                const imgEl = document.createElement('img');
+                imgEl.src = dataUrl;
+                imgEl.className = 'w-full h-auto object-contain border border-gray-300 shadow-sm transition-transform hover:scale-105 hover:z-10 relative bg-white';
+                imgEl.title = `列${r+1}，欄${c+1}`;
+                previewGrid.appendChild(imgEl);
+
+                const page = document.createElement('div');
+                page.className = orient === 'landscape' ? 'print-page landscape' : 'print-page';
+                const pImg = document.createElement('img');
+                pImg.src = dataUrl; page.appendChild(pImg);
+                printContainer.appendChild(page);
+            }
+        }
+
+        emptyPreview.classList.add('hidden');
+        previewGridCont.classList.remove('hidden');
+        actionsPanel.classList.remove('hidden');
+        previewInfo.innerText = `成功分割為 ${rows * cols} 塊`;
+        previewInfo.classList.remove('hidden');
+        showLoading(false);
+        if (window.innerWidth < 1024)
+            actionsPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+});
+
+// ── ZIP Download ───────────────────────────────────────
+downloadZipBtn.addEventListener('click', () => {
+    if (!generatedImagesData.length) return;
+    const orig = downloadZipBtn.innerHTML;
+    downloadZipBtn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin inline-block mr-2"></i>打包壓縮中…';
+    lucide.createIcons(); downloadZipBtn.disabled = true;
+    const zip = new JSZip();
+    generatedImagesData.forEach(({ dataUrl, filename }) =>
+        zip.file(filename, dataUrl.replace(/^data:image\/(png|jpeg);base64,/, ''), { base64: true }));
+    zip.generateAsync({ type: 'blob' })
+        .then(c => saveAs(c, '海報列印分割圖檔_車城國小.zip'))
+        .catch(() => showMessage('錯誤', '打包下載時發生錯誤。'))
+        .finally(() => { downloadZipBtn.innerHTML = orig; lucide.createIcons(); downloadZipBtn.disabled = false; });
+});
+
+// ── Print ──────────────────────────────────────────────
+printBtn.addEventListener('click', () => { if (generatedImagesData.length) window.print(); });
+</script>
+</body>
+</html>

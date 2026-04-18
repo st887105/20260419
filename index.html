@@ -10,35 +10,7 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 
     <style>
-        @page           { size: A4 portrait;  margin: 0; }
-        @page landscape { size: A4 landscape; margin: 0; }
-        @media print {
-            .no-print { display: none !important; }
-            body { margin: 0; padding: 0; background: white; }
-
-            #printContainer {
-                display: block !important;
-                margin: 0; padding: 0;
-            }
-
-            .print-page {
-                page-break-after: always;   /* JS 會把最後一頁改成 avoid */
-                page-break-inside: avoid;
-                break-after: page;          /* 現代瀏覽器屬性 */
-                margin: 0; padding: 0;
-                width: 210mm; height: 297mm;
-                overflow: hidden; background: white; display: block;
-            }
-            /* 最後一頁：JS 動態設定 class="print-page print-last" */
-            .print-page.print-last {
-                page-break-after: avoid !important;
-                break-after: avoid !important;
-            }
-
-            .print-page img { width: 210mm; height: 297mm; object-fit: fill; display: block; }
-            .print-page.landscape { page: landscape; width: 297mm; height: 210mm; }
-            .print-page.landscape img { width: 297mm; height: 210mm; }
-        }
+        /* 列印由 JS 開新視窗處理，此處不需要 @media print 規則 */
 
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
@@ -338,14 +310,6 @@
     </div>
 </footer>
 
-<div id="printContainer"></div>
-<style>
-    /* 螢幕上隱藏，列印時顯示 */
-    #printContainer { display: none; margin: 0; padding: 0; }
-    @media print   { #printContainer { display: block !important; margin: 0; padding: 0; } }
-    /* 確保 body 其他內容列印時消失 */
-    @media print   { body > *:not(#printContainer) { display: none !important; } }
-</style>
 
 <!-- Loading Overlay -->
 <div id="loadingOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 hidden">
@@ -403,7 +367,6 @@ const previewGridCont     = $('previewGridContainer');
 const previewGrid         = $('previewGrid');
 const emptyPreview        = $('emptyPreview');
 const previewInfo         = $('previewInfo');
-const printContainer      = $('printContainer');
 const auto4KToggle        = $('auto4K');
 const autoBgRemovalToggle = $('autoBgRemoval');
 const bgHint              = $('bgHint');
@@ -816,9 +779,8 @@ const doGenerate = (silent = false) => {
         const imgW = currentImage.naturalWidth  || currentImage.width;
         const imgH = currentImage.naturalHeight || currentImage.height;
 
-        previewGrid.innerHTML    = '';
-        printContainer.innerHTML = '';
-        generatedImagesData      = [];
+        previewGrid.innerHTML = '';
+        generatedImagesData   = [];
 
         previewGrid.style.display             = 'grid';
         previewGrid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
@@ -884,21 +846,13 @@ const doGenerate = (silent = false) => {
 
                 const dataUrl  = cv.toDataURL('image/jpeg', 0.95);
                 const filename = `海報切割_${getDateStamp()}_R${r+1}_C${c+1}.jpg`;
-                generatedImagesData.push({ dataUrl, filename });
+                generatedImagesData.push({ dataUrl, filename, orient });
 
                 const imgEl = document.createElement('img');
                 imgEl.src = dataUrl;
                 imgEl.className = 'w-full h-auto object-contain border border-gray-300 shadow-sm transition-transform hover:scale-105 hover:z-10 relative bg-white';
                 imgEl.title = `列${r+1}，欄${c+1}`;
                 previewGrid.appendChild(imgEl);
-
-                const isLast = (r === rows - 1) && (c === cols - 1);
-                const page = document.createElement('div');
-                const baseClass = orient === 'landscape' ? 'print-page landscape' : 'print-page';
-                page.className  = isLast ? `${baseClass} print-last` : baseClass;
-                const pImg = document.createElement('img');
-                pImg.src = dataUrl; page.appendChild(pImg);
-                printContainer.appendChild(page);
             }
         }
 
@@ -962,8 +916,49 @@ downloadZipBtn.addEventListener('click', () => {
         .finally(() => { downloadZipBtn.innerHTML = orig; lucide.createIcons(); downloadZipBtn.disabled = false; });
 });
 
-// ── Print ──────────────────────────────────────────────
-printBtn.addEventListener('click', () => { if (generatedImagesData.length) window.print(); });
+// ── Print — 開新視窗列印，完全乾淨，不受原頁面 DOM 影響 ──
+printBtn.addEventListener('click', () => {
+    if (!generatedImagesData.length) return;
+
+    const orient   = generatedImagesData[0].orient;
+    const isLandsc = orient === 'landscape';
+    const pw = isLandsc ? '297mm' : '210mm';
+    const ph = isLandsc ? '210mm' : '297mm';
+
+    // 每張圖用 <img> 包在一個剛好一頁的 div
+    const pages = generatedImagesData.map((item, i) => {
+        const isLast = i === generatedImagesData.length - 1;
+        const breakAfter = isLast ? 'avoid' : 'always';
+        return `<div style="width:${pw};height:${ph};overflow:hidden;margin:0;padding:0;page-break-after:${breakAfter};break-after:${isLast ? 'avoid' : 'page'};display:block;">
+  <img src="${item.dataUrl}" style="width:${pw};height:${ph};display:block;object-fit:fill;">
+</div>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>列印海報</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  @page { size:${isLandsc ? 'A4 landscape' : 'A4 portrait'}; margin:0; }
+  body { margin:0; padding:0; background:white; }
+</style>
+</head><body>${pages}</body></html>`;
+
+    const w = window.open('', '_blank', 'width=800,height=600');
+    if (!w) { showMessage('提示', '請允許彈出視窗，或在瀏覽器設定中允許此網站開啟新視窗。'); return; }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+
+    // 等圖片載入完成再列印
+    w.onload = () => {
+        w.focus();
+        w.print();
+        // 列印對話框關閉後自動關閉視窗
+        w.onafterprint = () => w.close();
+    };
+});
 </script>
 </body>
 </html>

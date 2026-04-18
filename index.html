@@ -784,6 +784,8 @@ const doGenerate = (silent = false) => {
 
         previewGrid.style.display             = 'grid';
         previewGrid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+        previewGrid.style.alignItems          = 'start';
+        previewGrid.style.gap                 = '4px';
 
         const pasteScaleW = pasteSize / 500;
         const pasteScaleH = pasteSize / 500;
@@ -846,10 +848,24 @@ const doGenerate = (silent = false) => {
 
                 const dataUrl  = cv.toDataURL('image/jpeg', 0.95);
                 const filename = `海報切割_${getDateStamp()}_R${r+1}_C${c+1}.jpg`;
-                generatedImagesData.push({ dataUrl, filename, orient });
+
+                // 預覽縮圖：直接從原圖切片，保持原始比例，讓預覽與裁切線編輯器一致
+                const THUMB_H  = 300; // 縮圖高度上限（px）
+                const thumbCv  = document.createElement('canvas');
+                const thumbSrcW = srcW, thumbSrcH = srcH;
+                const thumbScale = THUMB_H / thumbSrcH;
+                thumbCv.width  = Math.round(thumbSrcW * thumbScale);
+                thumbCv.height = Math.round(thumbSrcH * thumbScale);
+                const tCtx = thumbCv.getContext('2d');
+                tCtx.imageSmoothingEnabled = true;
+                tCtx.imageSmoothingQuality = 'high';
+                tCtx.drawImage(currentImage, srcX, srcY, srcW, srcH, 0, 0, thumbCv.width, thumbCv.height);
+                const thumbUrl = thumbCv.toDataURL('image/jpeg', 0.85);
+
+                generatedImagesData.push({ dataUrl, filename, orient, thumbUrl });
 
                 const imgEl = document.createElement('img');
-                imgEl.src = dataUrl;
+                imgEl.src = thumbUrl;   // 預覽用縮圖（原始比例）
                 imgEl.className = 'w-full h-auto object-contain border border-gray-300 shadow-sm transition-transform hover:scale-105 hover:z-10 relative bg-white';
                 imgEl.title = `列${r+1}，欄${c+1}`;
                 previewGrid.appendChild(imgEl);

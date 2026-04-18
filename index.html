@@ -613,13 +613,14 @@ const drawCropEditor = () => {
 };
 
 // Apply grid from col/row inputs
-const applyGridFromInputs = () => {
+// skipRegen: 由 generateBtn 呼叫時傳 true，避免多觸發一次
+const applyGridFromInputs = (skipRegen = false) => {
     const cols = Math.max(1, Math.min(15, parseInt(colsInput.value) || 1));
     const rows = Math.max(1, Math.min(15, parseInt(rowsInput.value) || 1));
     vLines = Array.from({ length: cols-1 }, (_, i) => (i+1)/cols);
     hLines = Array.from({ length: rows-1 }, (_, i) => (i+1)/rows);
     drawCropEditor();
-    scheduleRegenerate();
+    if (!skipRegen) scheduleRegenerate();
 };
 
 applyGridBtn.addEventListener('click', applyGridFromInputs);
@@ -877,7 +878,12 @@ const doGenerate = (silent = false) => {
     else setTimeout(run, 100);
 };
 
-generateBtn.addEventListener('click', () => doGenerate(false));
+generateBtn.addEventListener('click', () => {
+    // 每次按「開始產生」都先把輸入框的欄列數同步到格線陣列
+    // skipRegen=true 避免 applyGridFromInputs 裡的 scheduleRegenerate 重複觸發
+    applyGridFromInputs(true);
+    doGenerate(false);
+});
 
 // Also re-generate when orientation or paste settings change (if already generated)
 $('orientPortrait').addEventListener('change',  () => { updateOrientUI(); scheduleRegenerate(); });

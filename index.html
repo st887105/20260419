@@ -15,11 +15,23 @@
         @media print {
             .no-print { display: none !important; }
             body { margin: 0; padding: 0; background: white; }
+
+            /* printContainer 本身不產生任何換頁 */
+            #printContainer {
+                display: block !important;
+                margin: 0; padding: 0;
+            }
+
             .print-page {
-                page-break-after: always; page-break-inside: avoid;
+                /* 不用 always，改由 JS 動態設定，最後一頁不加換頁 */
+                page-break-inside: avoid;
+                margin: 0; padding: 0;
                 width: 210mm; height: 297mm;
                 overflow: hidden; background: white; display: block;
             }
+            /* 只有非最後一頁才換頁 */
+            .print-page:not(:last-child) { page-break-after: always; }
+
             .print-page img { width: 210mm; height: 297mm; object-fit: fill; display: block; }
             .print-page.landscape { page: landscape; width: 297mm; height: 210mm; }
             .print-page.landscape img { width: 297mm; height: 210mm; }
@@ -323,8 +335,14 @@
     </div>
 </footer>
 
-<div id="printContainer" style="display:none"></div>
-<style>@media print { #printContainer { display: block !important; } }</style>
+<div id="printContainer"></div>
+<style>
+    /* 螢幕上隱藏，列印時顯示 */
+    #printContainer { display: none; margin: 0; padding: 0; }
+    @media print   { #printContainer { display: block !important; margin: 0; padding: 0; } }
+    /* 確保 body 其他內容列印時消失 */
+    @media print   { body > *:not(#printContainer) { display: none !important; } }
+</style>
 
 <!-- Loading Overlay -->
 <div id="loadingOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 hidden">
@@ -392,6 +410,15 @@ const cropCtx             = cropCanvas.getContext('2d');
 // ── State ──────────────────────────────────────────────
 let currentImage        = null;
 let generatedImagesData = [];
+
+// ── Date helper ────────────────────────────────────────
+const getDateStamp = () => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm   = String(d.getMonth() + 1).padStart(2, '0');
+    const dd   = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}${mm}${dd}`;
+};
 
 // Crop editor
 let vLines     = [];       // x-ratios (0~1) for vertical cut lines
@@ -853,7 +880,7 @@ const doGenerate = (silent = false) => {
                 }
 
                 const dataUrl  = cv.toDataURL('image/jpeg', 0.95);
-                const filename = `Poster_R${r+1}_C${c+1}.jpg`;
+                const filename = `海報切割_${getDateStamp()}_R${r+1}_C${c+1}.jpg`;
                 generatedImagesData.push({ dataUrl, filename });
 
                 const imgEl = document.createElement('img');
@@ -925,7 +952,7 @@ downloadZipBtn.addEventListener('click', () => {
     generatedImagesData.forEach(({ dataUrl, filename }) =>
         zip.file(filename, dataUrl.replace(/^data:image\/(png|jpeg);base64,/, ''), { base64: true }));
     zip.generateAsync({ type: 'blob' })
-        .then(c => saveAs(c, '海報列印分割圖檔_車城國小.zip'))
+        .then(c => saveAs(c, `海報列印分割_${getDateStamp()}_車城國小.zip`))
         .catch(() => showMessage('錯誤', '打包下載時發生錯誤。'))
         .finally(() => { downloadZipBtn.innerHTML = orig; lucide.createIcons(); downloadZipBtn.disabled = false; });
 });

@@ -605,10 +605,15 @@ const drawCropEditor = () => {
         drawLine(0, y, dW, y, dragLine?.axis==='h' && dragLine?.idx===i);
     });
 
-    // Update counters
+    // Update counters + sync input boxes to match current line count
+    const curCols = vLines.length + 1;
+    const curRows = hLines.length + 1;
     $('vLineCount').innerText = vLines.length;
     $('hLineCount').innerText = hLines.length;
-    $('blockCount').innerText = (vLines.length+1) * (hLines.length+1);
+    $('blockCount').innerText = curCols * curRows;
+    // Keep input boxes in sync with actual line count
+    if (parseInt(colsInput.value) !== curCols) colsInput.value = curCols;
+    if (parseInt(rowsInput.value) !== curRows) rowsInput.value = curRows;
     updateA4Hint();
 };
 
@@ -624,6 +629,11 @@ const applyGridFromInputs = (skipRegen = false) => {
 };
 
 applyGridBtn.addEventListener('click', applyGridFromInputs);
+
+// 輸入框數字變動時立即套用格線（讓畫布即時反映）
+colsInput.addEventListener('change', applyGridFromInputs);
+rowsInput.addEventListener('change', applyGridFromInputs);
+
 resetCropBtn.addEventListener('click', () => {
     if (!currentImage) return;
     colsInput.value = 2; rowsInput.value = 3;
@@ -879,9 +889,16 @@ const doGenerate = (silent = false) => {
 };
 
 generateBtn.addEventListener('click', () => {
-    // 每次按「開始產生」都先把輸入框的欄列數同步到格線陣列
-    // skipRegen=true 避免 applyGridFromInputs 裡的 scheduleRegenerate 重複觸發
-    applyGridFromInputs(true);
+    // 只有在輸入框欄列數與目前格線數量不符時才重新套用
+    // 避免覆蓋使用者手動拖曳調整的格線位置
+    const inputCols = Math.max(1, Math.min(15, parseInt(colsInput.value) || 1));
+    const inputRows = Math.max(1, Math.min(15, parseInt(rowsInput.value) || 1));
+    const currentCols = vLines.length + 1;
+    const currentRows = hLines.length + 1;
+
+    if (inputCols !== currentCols || inputRows !== currentRows) {
+        applyGridFromInputs(true);  // 數量不符才重建格線
+    }
     doGenerate(false);
 });
 

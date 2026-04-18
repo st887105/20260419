@@ -16,21 +16,24 @@
             .no-print { display: none !important; }
             body { margin: 0; padding: 0; background: white; }
 
-            /* printContainer 本身不產生任何換頁 */
             #printContainer {
                 display: block !important;
                 margin: 0; padding: 0;
             }
 
             .print-page {
-                /* 不用 always，改由 JS 動態設定，最後一頁不加換頁 */
+                page-break-after: always;   /* JS 會把最後一頁改成 avoid */
                 page-break-inside: avoid;
+                break-after: page;          /* 現代瀏覽器屬性 */
                 margin: 0; padding: 0;
                 width: 210mm; height: 297mm;
                 overflow: hidden; background: white; display: block;
             }
-            /* 只有非最後一頁才換頁 */
-            .print-page:not(:last-child) { page-break-after: always; }
+            /* 最後一頁：JS 動態設定 class="print-page print-last" */
+            .print-page.print-last {
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+            }
 
             .print-page img { width: 210mm; height: 297mm; object-fit: fill; display: block; }
             .print-page.landscape { page: landscape; width: 297mm; height: 210mm; }
@@ -889,8 +892,10 @@ const doGenerate = (silent = false) => {
                 imgEl.title = `列${r+1}，欄${c+1}`;
                 previewGrid.appendChild(imgEl);
 
+                const isLast = (r === rows - 1) && (c === cols - 1);
                 const page = document.createElement('div');
-                page.className = orient === 'landscape' ? 'print-page landscape' : 'print-page';
+                const baseClass = orient === 'landscape' ? 'print-page landscape' : 'print-page';
+                page.className  = isLast ? `${baseClass} print-last` : baseClass;
                 const pImg = document.createElement('img');
                 pImg.src = dataUrl; page.appendChild(pImg);
                 printContainer.appendChild(page);

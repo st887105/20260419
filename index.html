@@ -426,13 +426,8 @@ autoBgRemovalToggle.addEventListener('change', () => {
     if (autoBgRemovalToggle.checked && location.protocol === 'file:')
         $('localFileWarn').classList.remove('hidden');
 });
-enablePasteChk.addEventListener('change', () => {
-    $('pasteSizeContainer').style.opacity = enablePasteChk.checked ? '1' : '0.5';
-    pasteSizeInput.disabled = !enablePasteChk.checked;
-});
-pasteSizeInput.addEventListener('input', () => {
-    pasteSizeDisplay.innerText = `${pasteSizeInput.value} px`;
-});
+// Note: enablePasteChk, pasteSizeInput, orientPortrait, orientLandscape
+// listeners are registered in the generate section (with auto-regen support)
 
 // ── A4 output ──────────────────────────────────────────
 const A4_PX = { portrait: { w: 2480, h: 3508 }, landscape: { w: 3508, h: 2480 } };
@@ -451,8 +446,7 @@ const updateA4Hint = () => {
     $('a4SizeLabel').innerText = `${w} × ${h} px（A4 ${label} 300dpi）`;
     $('a4TotalLabel').innerText = `${blocks} 張`;
 };
-$('orientPortrait').addEventListener('change',  updateOrientUI);
-$('orientLandscape').addEventListener('change', updateOrientUI);
+// orient listeners registered in generate section (with auto-regen)
 
 // ── 4K upscale ─────────────────────────────────────────
 const upscaleTo4K = (blob) => new Promise((resolve, reject) => {
@@ -625,6 +619,7 @@ const applyGridFromInputs = () => {
     vLines = Array.from({ length: cols-1 }, (_, i) => (i+1)/cols);
     hLines = Array.from({ length: rows-1 }, (_, i) => (i+1)/rows);
     drawCropEditor();
+    scheduleRegenerate();
 };
 
 applyGridBtn.addEventListener('click', applyGridFromInputs);
@@ -707,19 +702,27 @@ cropCanvas.addEventListener('mousedown', e => {
         if (near) dragLine = near;
     } else if (editorMode === 'addV') {
         vLines.push(pos.x/cw); vLines.sort((a,b)=>a-b); drawCropEditor(); setMode('move');
+        scheduleRegenerate();
     } else if (editorMode === 'addH') {
         hLines.push(pos.y/ch); hLines.sort((a,b)=>a-b); drawCropEditor(); setMode('move');
+        scheduleRegenerate();
     } else if (editorMode === 'delete') {
         if (near) {
             if (near.axis==='v') vLines.splice(near.idx,1);
             else                 hLines.splice(near.idx,1);
             drawCropEditor();
+            scheduleRegenerate();
         }
     }
 });
 
 window.addEventListener('mouseup', () => {
-    if (dragLine) { dragLine = null; cropCanvas.classList.remove('dragging'); drawCropEditor(); }
+    if (dragLine) {
+        dragLine = null;
+        cropCanvas.classList.remove('dragging');
+        drawCropEditor();
+        scheduleRegenerate();
+    }
 });
 
 // Touch
@@ -737,12 +740,21 @@ cropCanvas.addEventListener('touchmove', e => {
     else                     hLines[dragLine.idx] = Math.max(0.005, Math.min(0.995, pos.y/ch));
     drawCropEditor();
 }, { passive: false });
-cropCanvas.addEventListener('touchend', () => { dragLine = null; drawCropEditor(); });
+cropCanvas.addEventListener('touchend', () => { dragLine = null; drawCropEditor(); scheduleRegenerate(); });
 
 // ══════════════════════════════════════════════════════
 // Generate — uses vLines/hLines ratios as boundaries
 // ══════════════════════════════════════════════════════
-generateBtn.addEventListener('click', () => {
+
+// Auto-regenerate: debounce 400ms after grid changes if result already exists
+let _regenTimer = null;
+const scheduleRegenerate = () => {
+    if (generatedImagesData.length === 0) return;   // 尚未產生過，不自動觸發
+    clearTimeout(_regenTimer);
+    _regenTimer = setTimeout(() => doGenerate(true), 400);
+};
+
+const doGenerate = (silent = false) => {
     if (!currentImage) return;
 
     const enablePaste = enablePasteChk.checked;
@@ -757,9 +769,9 @@ generateBtn.addEventListener('click', () => {
     const rows = yB.length - 1;
 
     if (cols * rows > 100) { showMessage('提示', '切割數量超過 100 塊，請減少裁切線。'); return; }
-    showLoading(true, '圖塊產生中', '正在將每塊切割至標準 A4 尺寸…');
+    if (!silent) showLoading(true, '圖塊產生中', '正在將每塊切割至標準 A4 尺寸…');
 
-    setTimeout(() => {
+    const run = () => {
         const imgW = currentImage.naturalWidth  || currentImage.width;
         const imgH = currentImage.naturalHeight || currentImage.height;
 
@@ -852,10 +864,32 @@ generateBtn.addEventListener('click', () => {
         actionsPanel.classList.remove('hidden');
         previewInfo.innerText = `成功分割為 ${rows * cols} 塊`;
         previewInfo.classList.remove('hidden');
-        showLoading(false);
-        if (window.innerWidth < 1024)
-            actionsPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
+        if (!silent) {
+            showLoading(false);
+            if (window.innerWidth < 1024)
+                actionsPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+            showLoading(false);
+        }
+    };
+
+    if (silent) run();
+    else setTimeout(run, 100);
+};
+
+generateBtn.addEventListener('click', () => doGenerate(false));
+
+// Also re-generate when orientation or paste settings change (if already generated)
+$('orientPortrait').addEventListener('change',  () => { updateOrientUI(); scheduleRegenerate(); });
+$('orientLandscape').addEventListener('change', () => { updateOrientUI(); scheduleRegenerate(); });
+enablePasteChk.addEventListener('change', () => {
+    $('pasteSizeContainer').style.opacity = enablePasteChk.checked ? '1' : '0.5';
+    pasteSizeInput.disabled = !enablePasteChk.checked;
+    scheduleRegenerate();
+});
+pasteSizeInput.addEventListener('input', () => {
+    pasteSizeDisplay.innerText = `${pasteSizeInput.value} px`;
+    scheduleRegenerate();
 });
 
 // ── ZIP Download ───────────────────────────────────────
